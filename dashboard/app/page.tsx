@@ -36,7 +36,7 @@ interface Stats {
   avg_compression: number
   compression_breakdown?: { github: number; slack: number; complaints: number }
   total_tokens_saved?: number
-  query_history?: any[]
+  query_history?: unknown[]
   total_remediations?: number
 }
 
@@ -65,8 +65,6 @@ export default function Dashboard() {
   const [result, setResult] = useState<QueryResult | null>(null)
   const [stats, setStats] = useState<Stats | null>(null)
   const [error, setError] = useState<string | null>(null)
-  const [isIngesting, setIsIngesting] = useState(false)
-  const [lastFetch, setLastFetch] = useState<string | null>(null)
   const [isRemediating, setIsRemediating] = useState(false)
   const [prUrl, setPrUrl] = useState<string | null>(null)
   const [remediateError, setRemediateError] = useState<string | null>(null)
@@ -107,20 +105,6 @@ export default function Dashboard() {
     }
     setIsQuerying(false)
   }
-
-  const handleIngest = async () => {
-    setIsIngesting(true)
-    try {
-      await fetch('/api/ingest', { method: 'POST' })
-      const s = await fetch('/api/stats').then(r => r.json())
-      if (!s.error) setStats(s)
-      setLastFetch(new Date().toLocaleTimeString('en-IN'))
-    } catch {
-      // silently fail
-    }
-    setIsIngesting(false)
-  }
-
   const handleRemediate = async () => {
     if (!result || isRemediating) return
     setIsRemediating(true)
