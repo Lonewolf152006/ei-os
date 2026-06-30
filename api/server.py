@@ -464,6 +464,10 @@ def run_remediate(request: RemediateRequest):
 def health():
     return {"status": "ok"}
 
+@app.get("/")
+def read_root():
+    return {"message": "EI-OS API is running!"}
+
 
 if __name__ == '__main__':
     import uvicorn
