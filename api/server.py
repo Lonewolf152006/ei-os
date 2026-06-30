@@ -149,6 +149,23 @@ def get_stats():
         except Exception:
             pass
 
+        # --- TASK 3: Add Lemma table read for remediations ---
+        try:
+            result = subprocess.run(
+                [lemma_bin, 'record', 'list', 'remediations', 
+                 '--json'],
+                capture_output=True, text=True, encoding="utf-8", timeout=5
+            )
+            if result.returncode == 0:
+                remediation_data = json.loads(result.stdout)
+                remediation_history = remediation_data.get('items', [])
+            else:
+                remediation_history = []
+        except Exception:
+            remediation_history = []
+            
+        total_remediations = len(remediation_history)
+
         return {
             "total_events": total_events,
             "total_edges": total_edges,
@@ -161,6 +178,8 @@ def get_stats():
             "compression_breakdown": compression_breakdown,
             "total_tokens_saved": total_tokens_saved,
             "query_history": history[:5],
+            "remediation_history": remediation_history[:5],
+            "total_remediations": total_remediations,
             "status": "ok",
         }
     except Exception as e:
@@ -342,6 +361,31 @@ def run_remediate(request: RemediateRequest):
             raise HTTPException(status_code=502, detail=f"GitHub PR creation failed: {pr_resp.text[:300]}")
 
         pr_data = pr_resp.json()
+        
+        # --- TASK 1: Add to remediations Lemma table ---
+        import subprocess, json as _json
+        
+        lemma_bin = shutil.which('lemma')
+        if not lemma_bin:
+            local_bin = os.path.expanduser('~/.local/bin/lemma')
+            if os.path.exists(local_bin):
+                lemma_bin = local_bin
+            elif os.path.exists(local_bin + '.exe'):
+                lemma_bin = local_bin + '.exe'
+            else:
+                lemma_bin = 'lemma'
+                
+        try:
+            subprocess.run([lemma_bin, 'record', 'create', 'remediations',
+                '--data', _json.dumps({
+                    "root_cause":   request.root_cause,
+                    "pr_url":       pr_data["html_url"],
+                    "branch_name":  branch_name,
+                    "status":       "open"
+                })], capture_output=True, timeout=10)
+        except Exception:
+            pass  # never let Lemma write failure break the response
+
         return {
             "status": "ok",
             "pr_url": pr_data["html_url"],

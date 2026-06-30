@@ -37,6 +37,7 @@ interface Stats {
   compression_breakdown?: { github: number; slack: number; complaints: number }
   total_tokens_saved?: number
   query_history?: any[]
+  total_remediations?: number
 }
 
 const SOURCE_STYLES: Record<string, string> = {
@@ -374,7 +375,7 @@ export default function Dashboard() {
 
         {/* Stats */}
         {stats && !result && !isQuerying && (
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-x-8 gap-y-16">
+          <div className="grid grid-cols-2 md:grid-cols-5 gap-x-8 gap-y-16">
             <div className="border-t border-[#262626] pt-6">
               <p className="text-3xl tracking-[0.05em] uppercase mb-2 font-sans">
                 {stats.total_events}
@@ -405,6 +406,14 @@ export default function Dashboard() {
               </p>
               <p className="text-[11px] uppercase tracking-[0.15em] text-[#999999] font-mono">
                 GITHUB PRS
+              </p>
+            </div>
+            <div className="border-t border-[#262626] pt-6">
+              <p className="text-3xl tracking-[0.05em] uppercase mb-2 font-sans">
+                {stats.total_remediations || 0}
+              </p>
+              <p className="text-[11px] uppercase tracking-[0.15em] text-[#999999] font-mono">
+                PRs auto-drafted
               </p>
             </div>
           </div>

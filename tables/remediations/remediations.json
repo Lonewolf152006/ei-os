@@ -1,0 +1,14 @@
+{
+  // Folder name must equal "name". Import validates the match.
+  "name": "remediations",
+  "primary_key_column": "id",   // an auto UUID "id" is added; never declare id/created_at/updated_at/user_id
+  "enable_rls": true,           // true = per-user private rows (default); false = shared team data
+  "visibility": "POD",          // one of: PERSONAL | POD | PUBLIC | RESTRICTED
+  "columns": [
+    { "name": "root_cause", "type": "TEXT", "required": true },
+    { "name": "pr_url", "type": "TEXT", "required": true },
+    { "name": "branch_name", "type": "TEXT", "required": true },
+    { "name": "status", "type": "TEXT", "default": "open" }
+  ],
+  "config": {}
+}
