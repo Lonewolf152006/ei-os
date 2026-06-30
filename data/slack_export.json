@@ -1,0 +1,114 @@
+[
+  {
+    "channel": "#engineering",
+    "user": "maya_rodriguez",
+    "text": "Morning everyone 👋 Just pushed the email template updates. Can someone sanity check the dark mode rendering on the invite template?",
+    "ts": "2026-06-23T09:15:32Z",
+    "thread_ts": null,
+    "reactions": [{ "name": "eyes", "count": 2 }]
+  },
+  {
+    "channel": "#engineering",
+    "user": "jake_torres",
+    "text": "Looks good on my end @maya_rodriguez — tested on Outlook and Apple Mail. Dark mode works fine.",
+    "ts": "2026-06-23T09:28:14Z",
+    "thread_ts": "2026-06-23T09:15:32Z",
+    "reactions": [{ "name": "thumbsup", "count": 1 }]
+  },
+  {
+    "channel": "#engineering",
+    "user": "rahul_m",
+    "text": "Rate limiting PR just merged. If anyone sees 429s in staging, that's expected — I'm tuning the burst threshold.",
+    "ts": "2026-06-23T10:12:45Z",
+    "thread_ts": null,
+    "reactions": []
+  },
+  {
+    "channel": "#engineering",
+    "user": "priya_sharma",
+    "text": "Quick heads up — the activity logging from PR #218 is live in production as of last night. If you see new rows in users_activity, that's expected behavior.",
+    "ts": "2026-06-23T10:45:00Z",
+    "thread_ts": null,
+    "reactions": [{ "name": "white_check_mark", "count": 3 }]
+  },
+  {
+    "channel": "#engineering",
+    "user": "jake_torres",
+    "text": "Anyone else having trouble running the test suite locally? Getting some flaky timeout on the document export tests. Might be my machine though.",
+    "ts": "2026-06-23T11:20:18Z",
+    "thread_ts": null,
+    "reactions": []
+  },
+  {
+    "channel": "#engineering",
+    "user": "sarah_chen",
+    "text": "🚨 Hey team — I'm seeing database queries timing out on the documents endpoint. `GET /api/v2/documents/:id` is taking 8-12 seconds when it usually takes <200ms. Started noticing around 2pm. Anyone else seeing this?",
+    "ts": "2026-06-23T14:32:07Z",
+    "thread_ts": null,
+    "reactions": [{ "name": "rotating_light", "count": 4 }]
+  },
+  {
+    "channel": "#engineering",
+    "user": "rahul_m",
+    "text": "Confirming — API latency is through the roof. I pulled the Datadog dashboard and p99 on the documents service spiked from 180ms to 11.2s starting around 13:45 UTC. Attaching screenshot of the latency graph. [latency_spike_20260623.png]",
+    "ts": "2026-06-23T14:38:22Z",
+    "thread_ts": "2026-06-23T14:32:07Z",
+    "reactions": [{ "name": "chart_with_upwards_trend", "count": 2 }]
+  },
+  {
+    "channel": "#engineering",
+    "user": "dev_lead",
+    "text": "This is impacting customers — support just pinged me about timeout complaints. What changed since yesterday? We need to identify the root cause ASAP.",
+    "ts": "2026-06-23T14:44:51Z",
+    "thread_ts": "2026-06-23T14:32:07Z",
+    "reactions": []
+  },
+  {
+    "channel": "#engineering",
+    "user": "sarah_chen",
+    "text": "Looking at the deploy log... PR #218 (activity logging) merged last night at 23:22 UTC. That added INSERT queries on every document read and write. Could the new `users_activity` table be the culprit? @priya_sharma",
+    "ts": "2026-06-23T14:52:33Z",
+    "thread_ts": "2026-06-23T14:32:07Z",
+    "reactions": [{ "name": "eyes", "count": 5 }]
+  },
+  {
+    "channel": "#engineering",
+    "user": "priya_sharma",
+    "text": "Oh no — the users_activity table doesn't have any indexes yet. We were going to evaluate query patterns first before adding them. But the sequential scans during INSERT might be locking up if the table grew fast overnight...",
+    "ts": "2026-06-23T14:58:16Z",
+    "thread_ts": "2026-06-23T14:32:07Z",
+    "reactions": []
+  },
+  {
+    "channel": "#engineering",
+    "user": "dev_lead",
+    "text": "How many rows are in users_activity right now?",
+    "ts": "2026-06-23T15:02:40Z",
+    "thread_ts": "2026-06-23T14:32:07Z",
+    "reactions": []
+  },
+  {
+    "channel": "#engineering",
+    "user": "priya_sharma",
+    "text": "Just checked — 2.3 million rows. We have a lot more read traffic than I estimated. The batch flush on the export endpoint is generating huge bursts.",
+    "ts": "2026-06-23T15:06:11Z",
+    "thread_ts": "2026-06-23T14:32:07Z",
+    "reactions": [{ "name": "exploding_head", "count": 3 }]
+  },
+  {
+    "channel": "#engineering",
+    "user": "jake_torres",
+    "text": "Side note — got a ping from finance. The cloud compute bill for this week is trending 40% higher than last week. Probably related to the extra DB load?",
+    "ts": "2026-06-23T15:15:44Z",
+    "thread_ts": null,
+    "reactions": [{ "name": "money_with_wings", "count": 2 }]
+  },
+  {
+    "channel": "#engineering",
+    "user": "maya_rodriguez",
+    "text": "Standup reminder: we're doing async standup today since half the team is heads-down on the latency issue. Drop your updates in #standup-async by EOD.",
+    "ts": "2026-06-23T15:30:00Z",
+    "thread_ts": null,
+    "reactions": [{ "name": "thumbsup", "count": 4 }]
+  }
+]

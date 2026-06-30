@@ -1,0 +1,100 @@
+[
+  {
+    "number": 215,
+    "title": "Refactor document upload endpoint",
+    "body": "## Summary\n\nRefactors the document upload endpoint (`POST /api/v2/documents/upload`) to use streaming multipart parsing instead of buffering the entire file in memory.\n\n### Changes\n- Replaced `multer` memory storage with streaming disk storage in `DocumentUploadController`\n- Added chunked upload support for files > 50MB\n- Extracted validation logic into `DocumentValidator` middleware\n- Updated integration tests to cover streaming edge cases\n- Reduced peak memory usage during upload by ~60%\n\n### Testing\n- All existing upload tests pass\n- Added 4 new tests for chunked uploads\n- Manual testing with 200MB PDF — completes in 3.2s vs previous 8.1s\n\n### Migration\nNo database changes required.",
+    "user": {
+      "login": "jake_torres"
+    },
+    "merged_at": "2026-06-20T14:35:00Z",
+    "created_at": "2026-06-19T09:10:00Z",
+    "labels": [
+      { "name": "refactor" },
+      { "name": "performance" }
+    ],
+    "changed_files": 7,
+    "html_url": "https://github.com/folio-inc/folio-api/pull/215"
+  },
+  {
+    "number": 216,
+    "title": "Add pagination to document list",
+    "body": "## Summary\n\nAdds cursor-based pagination to the `GET /api/v2/documents` endpoint. Previously this endpoint returned all documents for a workspace, which was causing timeouts for customers with 10k+ documents.\n\n### Changes\n- Added `cursor` and `limit` query parameters (default limit: 50, max: 200)\n- Implemented keyset pagination using `(created_at, id)` composite cursor\n- Added `Link` header with `next` and `prev` URLs per RFC 5988\n- Updated OpenAPI spec with pagination parameters\n- Added response metadata: `total_count`, `has_more`, `next_cursor`\n\n### Performance\n- p99 latency for document listing dropped from 2.4s to 120ms on workspaces with 50k documents\n- Query plan uses the existing `idx_documents_created_at` index\n\n### Testing\n- 8 new unit tests covering edge cases (empty results, single page, last page)\n- Load tested with 100k documents — stable at 350 RPS",
+    "user": {
+      "login": "sarah_chen"
+    },
+    "merged_at": "2026-06-21T11:20:00Z",
+    "created_at": "2026-06-20T16:45:00Z",
+    "labels": [
+      { "name": "feature" },
+      { "name": "api" }
+    ],
+    "changed_files": 5,
+    "html_url": "https://github.com/folio-inc/folio-api/pull/216"
+  },
+  {
+    "number": 217,
+    "title": "Fix null pointer in share link generation",
+    "body": "## Bug Fix\n\nFixes a `TypeError: Cannot read properties of null (reading 'permissions')` crash when generating share links for documents that have no explicit permission entries.\n\n### Root Cause\nThe `ShareLinkService.generate()` method assumed every document had at least one entry in `document_permissions`. Documents created via the bulk import API skipped permission initialization, resulting in a null `permissions` array.\n\n### Fix\n- Added null check in `ShareLinkService.generate()` before iterating permissions\n- Default to workspace-level permissions when document-level permissions are absent\n- Added migration to backfill missing permission entries for 847 affected documents\n\n### Testing\n- Added regression test with a document that has zero permission entries\n- Verified fix against production snapshot (847 docs, all generate links successfully)\n\n### Impact\nAffected ~12 customers on the Enterprise plan who use bulk import. No data loss — share links simply failed to generate.",
+    "user": {
+      "login": "priya_sharma"
+    },
+    "merged_at": "2026-06-22T09:45:00Z",
+    "created_at": "2026-06-21T17:30:00Z",
+    "labels": [
+      { "name": "bug" },
+      { "name": "p1" }
+    ],
+    "changed_files": 4,
+    "html_url": "https://github.com/folio-inc/folio-api/pull/217"
+  },
+  {
+    "number": 218,
+    "title": "Add user activity logging",
+    "body": "## Summary\n\nIntroduces comprehensive user activity logging to track all document reads and writes across the platform. This data will power the upcoming analytics dashboard and audit trail features requested by Enterprise customers.\n\n### Changes\n- Created migration `042_add_users_activity.sql` with a new `users_activity` table:\n  - Columns: `id` (BIGSERIAL), `user_id` (UUID FK), `document_id` (UUID FK), `action_type` (enum: READ, WRITE, DELETE, EXPORT), `ip_address` (INET), `user_agent` (TEXT), `metadata` (JSONB), `created_at` (TIMESTAMPTZ DEFAULT NOW())\n- Added three new queries to the documents service:\n  1. `INSERT INTO users_activity` triggered on every `GET /api/v2/documents/:id` (READ)\n  2. `INSERT INTO users_activity` triggered on every `PUT /api/v2/documents/:id` (WRITE)\n  3. Batch `INSERT INTO users_activity` for bulk operations via `POST /api/v2/documents/export` (EXPORT)\n- Updated `DocumentService` class to call `ActivityLogger.log()` after each document operation\n- Added `ActivityLogger` utility class with async batch flushing (flushes every 100 rows or 5 seconds)\n- Added unit tests covering read logging, write logging, bulk export logging, and flush timing\n\n### Notes\n- The `users_activity` table will grow fast in production. We should monitor row counts over the first week and evaluate if we need partitioning.\n- Audit trail query patterns are not yet finalized, so we will add targeted optimizations once we see real usage.\n\n### Reviewers\n@sarah_chen @dev_lead",
+    "user": {
+      "login": "priya_sharma"
+    },
+    "merged_at": "2026-06-22T23:22:00Z",
+    "created_at": "2026-06-22T10:15:00Z",
+    "labels": [
+      { "name": "feature" },
+      { "name": "database" },
+      { "name": "analytics" }
+    ],
+    "changed_files": 9,
+    "html_url": "https://github.com/folio-inc/folio-api/pull/218"
+  },
+  {
+    "number": 219,
+    "title": "Update email template styling",
+    "body": "## Summary\n\nUpdates the transactional email templates to match the new brand guidelines rolled out last week.\n\n### Changes\n- Updated `templates/email/` — all 6 templates (welcome, invite, share-notification, password-reset, weekly-digest, export-complete)\n- Replaced old logo SVG with new wordmark\n- Updated color palette: primary from `#2563EB` to `#4F46E5`, secondary from `#64748B` to `#6366F1`\n- Added dark mode support via `@media (prefers-color-scheme: dark)`\n- Fixed Gmail clipping issue on the weekly digest template (was over 102KB)\n- Updated email preview text for all templates\n\n### Testing\n- Tested on Litmus across 12 email clients (Gmail, Outlook, Apple Mail, etc.)\n- All templates render correctly in both light and dark mode\n- Weekly digest now 78KB (under Gmail's 102KB clip threshold)",
+    "user": {
+      "login": "maya_rodriguez"
+    },
+    "merged_at": "2026-06-23T08:10:00Z",
+    "created_at": "2026-06-22T15:30:00Z",
+    "labels": [
+      { "name": "design" },
+      { "name": "cosmetic" }
+    ],
+    "changed_files": 8,
+    "html_url": "https://github.com/folio-inc/folio-api/pull/219"
+  },
+  {
+    "number": 220,
+    "title": "Add rate limiting to API endpoints",
+    "body": "## Summary\n\nAdds token-bucket rate limiting to all public API endpoints to prevent abuse and ensure fair usage across tenants.\n\n### Changes\n- Added `RateLimiter` middleware using Redis-backed token bucket algorithm\n- Default limits: 100 requests/minute for standard tier, 500/minute for Enterprise\n- Added `X-RateLimit-Limit`, `X-RateLimit-Remaining`, and `X-RateLimit-Reset` response headers\n- Returns `429 Too Many Requests` with `Retry-After` header when limit exceeded\n- Per-tenant limits configurable via `tenant_settings.rate_limit_rpm` column\n- Added `/api/v2/rate-limit/status` endpoint for clients to check their current usage\n\n### Configuration\n- Redis connection uses existing `REDIS_URL` env var\n- Sliding window size: 60 seconds\n- Burst allowance: 20% over limit for short spikes\n\n### Testing\n- 12 new tests covering normal flow, burst, exceeded, and reset scenarios\n- Load tested at 2x limit — 429s returned correctly within 50ms\n- Verified no performance impact on requests within limit (< 1ms overhead)",
+    "user": {
+      "login": "rahul_m"
+    },
+    "merged_at": "2026-06-23T10:05:00Z",
+    "created_at": "2026-06-22T18:00:00Z",
+    "labels": [
+      { "name": "feature" },
+      { "name": "security" },
+      { "name": "api" }
+    ],
+    "changed_files": 6,
+    "html_url": "https://github.com/folio-inc/folio-api/pull/220"
+  }
+]

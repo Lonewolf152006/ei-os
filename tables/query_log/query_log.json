@@ -1,0 +1,16 @@
+{
+  "name": "query_log",
+  "primary_key_column": "id",
+  "enable_rls": false,
+  "visibility": "POD",
+  "columns": [
+    { "name": "question", "type": "TEXT", "required": true },
+    { "name": "root_cause", "type": "TEXT" },
+    { "name": "suggested_fix", "type": "TEXT" },
+    { "name": "confidence", "type": "FLOAT" },
+    { "name": "savings", "type": "TEXT" },
+    { "name": "step_count", "type": "INTEGER" },
+    { "name": "asked_at", "type": "DATETIME", "default": "now" }
+  ],
+  "config": {}
+}
