@@ -1,0 +1,14 @@
+{
+  "name": "query-agent",
+  "description": "TODO: what this agent decides or drafts.",
+  "instruction": { "$file": "instruction.md" },
+  // toolsets: POD SKILLS SPEECH SUBAGENTS TODO USER_INTERACTION WEB_SEARCH WORKSPACE_CLI
+  "toolsets": ["POD"],
+  "visibility": "POD",   // PERSONAL | POD | PUBLIC | RESTRICTED
+  // agent_runtime omitted -> the system runtime profile (system:lemma). Add it to pin a specific model.
+  "permissions": { "grants": [
+    // Zero access by default — grant every table/folder/app this agent touches.
+    // { "resource_type": "datastore_table", "resource_name": "items",
+    //   "permission_ids": ["datastore.table.read", "datastore.record.read"] }
+  ] }
+}
