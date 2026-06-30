@@ -5,3 +5,7 @@ anthropic
 requests
 fastapi
 uvicorn[standard]
+
+sqlalchemy
+asyncpg
+pgvector

@@ -34,9 +34,56 @@ check("DATABASE_URL is set", lambda:
     (None if os.getenv("DATABASE_URL") 
      else (_ for _ in ()).throw(AssertionError("Missing"))))
 
-check("LLM API_KEY is set", lambda:
-    (None if (os.getenv("ANTHROPIC_API_KEY") or os.getenv("OPENROUTER_API_KEY") or os.getenv("INCEPTION_API_KEY"))
+check("GITHUB_TOKEN is set", lambda:
+    (None if os.getenv("GITHUB_TOKEN")
      else (_ for _ in ()).throw(AssertionError("Missing"))))
+
+check("GITHUB_REPO is set", lambda:
+    (None if os.getenv("GITHUB_REPO")
+     else (_ for _ in ()).throw(AssertionError("Missing"))))
+
+check("LLM key is set (Anthropic or Inception)", lambda:
+    (None if (os.getenv("ANTHROPIC_API_KEY") or os.getenv("INCEPTION_API_KEY"))
+     else (_ for _ in ()).throw(AssertionError(
+         "Neither ANTHROPIC_API_KEY nor INCEPTION_API_KEY is set"))))
+
+def test_github_token_valid():
+    token = os.getenv("GITHUB_TOKEN")
+    repo  = os.getenv("GITHUB_REPO")
+    r = requests.get(
+        f"https://api.github.com/repos/{repo}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10
+    )
+    assert r.status_code == 200, \
+        f"GitHub API returned {r.status_code}: {r.json().get('message')}"
+    data = r.json()
+    assert data.get("full_name") == repo, \
+        f"Repo mismatch: expected {repo}, got {data.get('full_name')}"
+    return f"Connected to {data['full_name']}"
+
+def test_github_write_access():
+    # Critical safety check — confirms this is a repo you OWN, 
+    # not a fork of someone else's real project with read-only access
+    token = os.getenv("GITHUB_TOKEN")
+    repo  = os.getenv("GITHUB_REPO")
+    r = requests.get(
+        f"https://api.github.com/repos/{repo}",
+        headers={"Authorization": f"Bearer {token}"},
+        timeout=10
+    )
+    perms = r.json().get("permissions", {})
+    assert perms.get("push") is True, (
+        "Token does NOT have write access to this repo — "
+        "branch/PR creation will fail with 403, or worse, may "
+        "attempt to act against an upstream repo if this is a "
+        "fork. Point GITHUB_REPO at a repo you personally own "
+        "and created from scratch."
+    )
+    return "Write access confirmed — safe to create branches/PRs"
+
+check("GitHub token can read repo",     test_github_token_valid)
+check("GitHub token has write access",  test_github_write_access)
 
 check("LEMMA_API_KEY is set", lambda:
     (None if os.getenv("LEMMA_API_KEY")
@@ -199,8 +246,11 @@ def test_query_agent():
     result = run("Why did our cloud costs spike this month?")
     assert 'error' not in result, f"Query failed: {result.get('error')}"
     assert 'reasoning_steps' in result, "No reasoning_steps in response"
-    assert len(result['reasoning_steps']) >= 2, \
-        f"Only {len(result['reasoning_steps'])} steps — need 2+"
+    assert len(result['reasoning_steps']) >= 4, (
+        f"Only {len(result['reasoning_steps'])} steps — need 4+. "
+        f"Check event_edges in Neon; may need the manual edge "
+        f"inserts from the earlier causal-chain fix."
+    )
     assert 'root_cause' in result, "No root_cause field"
     assert 'suggested_fix' in result, "No suggested_fix field"
     assert 'confidence' in result, "No confidence field"
@@ -223,6 +273,12 @@ def test_planning_agent():
     savings_str = plan['savings'].replace(',','').replace('₹','')
     savings_num = int(re.sub(r'[^\d]', '', savings_str) or 0)
     assert savings_num > 0, "Savings estimate is ₹0"
+    assert 50000 <= savings_num <= 150000, (
+        f"Savings of ₹{savings_num:,} is outside the believable "
+        f"range (₹50,000–₹1,50,000). Check base_savings in "
+        f"planning_agent.py — should be 180 * 24 * 30, not "
+        f"600 * 24 * 30."
+    )
     return f"Savings: {plan['savings']} · " \
            f"Priority: {plan['jira_ticket']['priority']}"
 
@@ -276,10 +332,22 @@ def test_api_query():
         f"HTTP {r.status_code}: {r.text[:100]}"
     data = r.json()
     assert 'reasoning_steps' in data, "No reasoning_steps"
-    assert len(data['reasoning_steps']) >= 2, \
-        f"Only {len(data['reasoning_steps'])} steps"
+    assert len(data['reasoning_steps']) >= 4, (
+        f"Only {len(data['reasoning_steps'])} steps — need 4+. "
+        f"Check event_edges in Neon; may need the manual edge "
+        f"inserts from the earlier causal-chain fix."
+    )
     assert 'root_cause' in data, "No root_cause"
     assert 'savings' in data, "No savings"
+    savings_str = data['savings'].replace(',','').replace('₹','')
+    savings_num = int(re.sub(r'[^\d]', '', savings_str) or 0)
+    assert savings_num > 0, "Savings estimate is ₹0"
+    assert 50000 <= savings_num <= 150000, (
+        f"Savings of ₹{savings_num:,} is outside the believable "
+        f"range (₹50,000–₹1,50,000). Check base_savings in "
+        f"planning_agent.py — should be 180 * 24 * 30, not "
+        f"600 * 24 * 30."
+    )
     assert 'jira_ticket' in data, "No jira_ticket"
     return f"{len(data['reasoning_steps'])} steps · {data['savings']}"
 
@@ -295,11 +363,40 @@ def test_api_docs():
     assert r.status_code == 200, f"Docs not loading: HTTP {r.status_code}"
     return "Swagger UI accessible"
 
+def test_remediate_endpoint_exists():
+    r = requests.options(f"{API}/remediate", timeout=5)
+    assert r.status_code in (200, 405), \
+        f"Unexpected status {r.status_code} — endpoint may be missing"
+    return "Endpoint reachable"
+
+def test_remediate_live():
+    if os.getenv("RUN_LIVE_REMEDIATE_TEST") != "true":
+        print(f"  {WARN}  Skipped — creates a REAL branch+PR on "
+              f"{os.getenv('GITHUB_REPO')}. Run with "
+              f"RUN_LIVE_REMEDIATE_TEST=true to test for real.")
+        return
+    r = requests.post(
+        f"{API}/remediate",
+        json={
+            "root_cause": "Test: PR 218 caused sequential scans",
+            "suggested_fix": "Add composite index to users_activity"
+        },
+        timeout=30
+    )
+    assert r.status_code == 200, f"HTTP {r.status_code}: {r.text[:200]}"
+    data = r.json()
+    assert 'pr_url' in data, "No pr_url in response"
+    assert data['pr_url'].startswith('https://github.com/'), \
+        f"pr_url doesn't look like a real GitHub URL: {data['pr_url']}"
+    return f"Live PR created: {data['pr_url']}"
+
 check("FastAPI is running",       lambda: api_get("/stats"))
 check("/stats returns valid data",test_api_stats)
 check("/query returns trace",     test_api_query)
 check("/ingest returns ok",       test_api_ingest)
 check("/docs loads",              test_api_docs)
+check("/remediate endpoint exists", test_remediate_endpoint_exists)
+check("/remediate creates a real PR (opt-in)", test_remediate_live)
 
 print("\n── Hour 4: Dashboard ────────────────────")
 
@@ -330,19 +427,63 @@ def test_nextjs_api_stats():
 check("Dashboard loads at :3000",         test_dashboard_loads)
 check("Next.js /api/stats proxies ok",    test_nextjs_api_stats)
 
+print("\n── Lemma Authentication & Hosting ───────")
+
+def test_lemma_authenticated():
+    result = subprocess.run(
+        ['lemma', 'auth', 'status'],
+        capture_output=True, text=True, timeout=10
+    )
+    # Exact subcommand may differ by CLI version — 
+    # check `lemma auth --help` if this check fails unexpectedly
+    combined = (result.stdout + result.stderr).lower()
+    assert 'not logged in' not in combined and \
+           'unauthenticated' not in combined and \
+           result.returncode == 0, \
+        "Not authenticated. Run: lemma auth login"
+    return "Authenticated"
+
+def test_lemma_cloud_server():
+    result = subprocess.run(
+        ['lemma', 'servers', 'select'],
+        capture_output=True, text=True, timeout=10
+    )
+    output = (result.stdout + result.stderr).lower()
+    if 'local' in output and 'cloud' not in output and \
+       'lemma.work' not in output:
+        raise AssertionError(
+            "Pod appears to be on the LOCAL server — "
+            "ayush@gappy.ai cannot reach it. Check `lemma servers "
+            "--help` for the cloud option, switch, then re-verify "
+            "functions/tables/workflows exist on the cloud pod."
+        )
+    return result.stdout.strip()[:60] or "Review output manually"
+
+check("Lemma CLI is authenticated",          test_lemma_authenticated)
+check("Pod is on cloud server (manual review if uncertain)",
+      test_lemma_cloud_server)
+
 print("\n── Hour 5-6: Lemma Integration ──────────")
 
 def run_lemma(args):
-    # Mocking lemma CLI since it's not installed in this environment
-    if args == ['--version']:
-        return "lemma 1.0.0", 0
-    elif args == ['agent', 'list']:
-        return "memory-agent query-agent planning-agent", 0
-    elif args == ['workflow', 'list']:
-        return "ingest-pipeline", 0
-    elif args == ['record', 'list', 'query-log']:
-        return "query-log record 1", 0
-    return "", 1
+    # Actually running lemma CLI
+    try:
+        result = subprocess.run(
+            ['lemma'] + args,
+            capture_output=True, text=True, timeout=10
+        )
+        return result.stdout + result.stderr, result.returncode
+    except FileNotFoundError:
+        import platform
+        if platform.system() == "Windows":
+            # fallback for windows if not in path
+            cmd = "lemma " + " ".join(args)
+            try:
+                result = subprocess.run(cmd, shell=True, capture_output=True, text=True, timeout=10)
+                return result.stdout + result.stderr, result.returncode
+            except Exception as e:
+                return str(e), 1
+        return "lemma command not found", 1
 
 def test_lemma_cli():
     out, code = run_lemma(['--version'])
@@ -350,29 +491,40 @@ def test_lemma_cli():
         "lemma CLI not found or not working"
     return out.strip()[:40]
 
-def test_lemma_agents():
-    out, code = run_lemma(['agent', 'list'])
-    agents = ['memory-agent', 'query-agent', 'planning-agent']
-    missing = [a for a in agents if a not in out]
-    assert not missing, f"Missing Lemma agents: {missing}"
-    return "All 3 agents registered"
+def test_lemma_functions():
+    out, code = run_lemma(['function', 'list'])
+    functions = ['memory-agent', 'query-agent', 'planning-agent']
+    missing = [f for f in functions if f not in out]
+    assert not missing, f"Missing Lemma functions: {missing}"
+    return "All 3 functions registered"
 
-def test_lemma_workflow():
+def test_lemma_tables():
+    out, code = run_lemma(['table', 'list'])
+    tables = ['query-log', 'remediations']
+    missing = [t for t in tables if t not in out]
+    assert not missing, f"Missing Lemma tables: {missing}"
+    return "Both tables present"
+
+def test_lemma_workflows_both():
     out, code = run_lemma(['workflow', 'list'])
-    assert 'ingest-pipeline' in out, \
-        "ingest-pipeline workflow not registered"
-    return "ingest-pipeline found"
+    workflows = ['ingest-pipeline', 'remediate-pipeline']
+    missing = [w for w in workflows if w not in out]
+    assert not missing, f"Missing Lemma workflows: {missing}"
+    return "Both workflows present"
 
-def test_lemma_query_log():
-    out, code = run_lemma(['record', 'list', 'query-log'])
-    assert code == 0, "query-log table not found or no access"
-    assert len(out.strip()) > 0, "query-log table is empty"
-    return "Records found in query-log"
+def test_remediations_table_reachable():
+    out, code = run_lemma(['record', 'list', 'remediations'])
+    assert code == 0, "remediations table not accessible"
+    if len(out.strip()) == 0:
+        print(f"  {WARN}  Table is empty — run the live remediate "
+              f"test at least once before recording")
+    return "Table accessible"
 
-check("lemma CLI available",             test_lemma_cli)
-check("3 agents registered in pod",      test_lemma_agents)
-check("ingest-pipeline workflow exists", test_lemma_workflow)
-check("query-log table has records",     test_lemma_query_log)
+check("lemma CLI available",                  test_lemma_cli)
+check("3 functions registered (migrated from agents)", test_lemma_functions)
+check("Both Lemma tables exist",              test_lemma_tables)
+check("Both Lemma workflows exist",           test_lemma_workflows_both)
+check("remediations table reachable",         test_remediations_table_reachable)
 
 print("\n── Hours 5-6: Files ─────────────────────")
 
@@ -455,6 +607,21 @@ def test_complaints_csv():
 check("github_prs.json is valid",  test_github_json)
 check("slack_export.json is valid",test_slack_json)
 check("complaints.csv is valid",   test_complaints_csv)
+
+print("\n── Manual checks (not automatable) ──────")
+print("""
+  [ ] Open the dashboard, run a query — Jira panel shows BOLD 
+      text, not raw **asterisks**
+  [ ] Source badges colored correctly: orange=GitHub, 
+      purple=Slack, red=complaints
+  [ ] Header shows live stats, not 'FETCHING...'
+  [ ] Logged into lemma.work, confirmed ayush@gappy.ai is added 
+      as a pod member (web UI — no CLI command for this)
+  [ ] If using lemma apps deploy, opened the public URL in an 
+      incognito window and confirmed it loads
+  [ ] Clicked AUTO-DRAFT GITHUB PR once for real, confirmed the 
+      returned link opens an actual GitHub PR page
+""")
 
 total  = len(results)
 passed = sum(1 for r in results if r[0] == 'PASS')

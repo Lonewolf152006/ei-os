@@ -1,0 +1,19 @@
+{
+  "name": "query-agent",
+  "description": "TODO: what this agent decides or drafts.",
+  "instruction": {
+    "$file": "instruction.md"
+  },
+  "toolsets": [
+    "POD"
+  ],
+  "visibility": "POD",
+  "permissions": {
+    "grants": [
+      {
+        "resource": "db-query-bridge",
+        "action": "execute"
+      }
+    ]
+  }
+}

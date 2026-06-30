@@ -18,9 +18,12 @@ import base64
 import traceback
 import requests as http_requests
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, BackgroundTasks, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from sqlalchemy.ext.asyncio import AsyncSession
+from api.db import get_session
+from api.models import IncidentTelemetry, SlackMessage
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -44,6 +47,66 @@ app.add_middleware(
 
 class QueryRequest(BaseModel):
     question: str
+
+class TelemetryPayload(BaseModel):
+    type: str # "telemetry" or "slack"
+    timestamp: str | None = None
+    cpu_spike: float | None = None
+    memory_usage: float | None = None
+    service_name: str | None = None
+    log_dump: str | None = None
+    channel: str | None = None
+    user: str | None = None
+    raw_text: str | None = None
+    text_embedding: list[float] | None = None
+
+def trigger_lemma_workflow():
+    import subprocess
+    import shutil
+    lemma_bin = shutil.which('lemma') or 'lemma'
+    try:
+        subprocess.run(
+            [lemma_bin, 'workflow', 'run-start', 'ingest-pipeline', '--data', '{"status": "new_anomaly_detected"}'],
+            capture_output=True, text=True, timeout=10
+        )
+    except Exception as e:
+        print(f"Warning: Lemma workflow failed to start: {e}")
+
+# ──────────────────────────────────────────────
+# POST /ingest-telemetry
+# ──────────────────────────────────────────────
+
+@app.post("/ingest-telemetry")
+async def ingest_telemetry(payload: TelemetryPayload, background_tasks: BackgroundTasks, db: AsyncSession = Depends(get_session)):
+    """Writes heavy telemetry to Neon Postgres and triggers Lemma AI workflow."""
+    if payload.type == "telemetry":
+        record = IncidentTelemetry(
+            cpu_spike=payload.cpu_spike,
+            memory_usage=payload.memory_usage,
+            service_name=payload.service_name,
+            log_dump=payload.log_dump
+        )
+        db.add(record)
+    elif payload.type == "slack":
+        record = SlackMessage(
+            channel=payload.channel,
+            user=payload.user,
+            raw_text=payload.raw_text,
+            text_embedding=payload.text_embedding
+        )
+        db.add(record)
+    else:
+        raise HTTPException(status_code=400, detail="Invalid telemetry type. Must be 'telemetry' or 'slack'.")
+        
+    try:
+        await db.commit()
+    except Exception as e:
+        await db.rollback()
+        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
+
+    background_tasks.add_task(trigger_lemma_workflow)
+
+    return {"status": "ok", "message": f"{payload.type} telemetry ingested and Lemma workflow triggered."}
 
 
 # ──────────────────────────────────────────────
@@ -150,18 +213,16 @@ def get_stats():
             pass
 
         # --- TASK 3: Add Lemma table read for remediations ---
+        import subprocess
+        import json as _json
         try:
             result = subprocess.run(
-                [lemma_bin, 'record', 'list', 'remediations', 
-                 '--json'],
-                capture_output=True, text=True, encoding="utf-8", timeout=5
+                ['lemma', 'record', 'list', 'remediations', '--format', 'json'],
+                capture_output=True, text=True, timeout=5
             )
-            if result.returncode == 0:
-                remediation_data = json.loads(result.stdout)
-                remediation_history = remediation_data.get('items', [])
-            else:
-                remediation_history = []
-        except Exception:
+            remediation_history = _json.loads(result.stdout) if result.returncode == 0 else []
+        except Exception as e:
+            print(f"Warning: Failed to fetch remediation history: {e}")
             remediation_history = []
             
         total_remediations = len(remediation_history)
@@ -363,28 +424,21 @@ def run_remediate(request: RemediateRequest):
         pr_data = pr_resp.json()
         
         # --- TASK 1: Add to remediations Lemma table ---
-        import subprocess, json as _json
+        import subprocess
+        import json as _json
         
-        lemma_bin = shutil.which('lemma')
-        if not lemma_bin:
-            local_bin = os.path.expanduser('~/.local/bin/lemma')
-            if os.path.exists(local_bin):
-                lemma_bin = local_bin
-            elif os.path.exists(local_bin + '.exe'):
-                lemma_bin = local_bin + '.exe'
-            else:
-                lemma_bin = 'lemma'
-                
         try:
-            subprocess.run([lemma_bin, 'record', 'create', 'remediations',
+            subprocess.run([
+                'lemma', 'record', 'create', 'remediations',
                 '--data', _json.dumps({
-                    "root_cause":   request.root_cause,
-                    "pr_url":       pr_data["html_url"],
-                    "branch_name":  branch_name,
-                    "status":       "open"
-                })], capture_output=True, timeout=10)
-        except Exception:
-            pass  # never let Lemma write failure break the response
+                    "root_cause": request.root_cause,
+                    "pr_url": pr_data["html_url"],
+                    "branch_name": branch_name,
+                    "status": "open"
+                })
+            ], capture_output=True, text=True, timeout=10, check=True)
+        except Exception as e:
+            print(f"Warning: Failed to write to Lemma remediations table: {e}")
 
         return {
             "status": "ok",

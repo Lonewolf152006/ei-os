@@ -1,0 +1,22 @@
+{
+  "name": "ingest-pipeline",
+  "description": "TODO: what this workflow orchestrates.",
+  "start": { "type": "MANUAL" },   // MANUAL | SCHEDULED | DATASTORE_EVENT | EVENT
+  "nodes": [
+    // Entry FORM collects the run input. Node types: FORM AGENT FUNCTION DECISION LOOP WAIT_UNTIL END
+    { "id": "intake", "type": "FORM", "label": "Intake",
+      "config": { "input_schema": {
+        "type": "object",
+        "properties": { "note": { "type": "string" } },
+        "required": ["note"] } } },
+    // Example next step (uncomment + create the agent, then wire an edge to it):
+    // { "id": "process", "type": "AGENT", "label": "Process",
+    //   "config": { "agent_name": "some-agent",
+    //     "input_mapping": { "note": { "type": "expression", "value": "intake.note" } } } },
+    { "id": "end", "type": "END", "label": "Done" }
+  ],
+  "edges": [
+    { "id": "e1", "source": "intake", "target": "end" }
+  ],
+  "visibility": "POD"
+}

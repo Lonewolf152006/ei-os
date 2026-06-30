@@ -1,0 +1,1 @@
+{"name": "db-query-bridge", "description": "Allows agents to securely query historical incident logs and telemetry from Neon Postgres.", "runtime": "python3.13", "entry_point": "main.db_query_bridge", "code": { "$file": "main.py" }, "timeout": 30}
